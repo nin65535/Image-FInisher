@@ -33,6 +33,10 @@ class RenameJobRequest(BaseModel):
     input_folder: str = Field(min_length=1)
 
 
+class MosaicJobRequest(RenameJobRequest):
+    mosaic_strength: int
+
+
 @router.post("/rename", status_code=status.HTTP_201_CREATED)
 async def create_rename_job(request: Request, body: RenameJobRequest) -> dict[str, Any]:
     scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
@@ -49,6 +53,32 @@ async def create_upscale_job(request: Request, body: RenameJobRequest) -> dict[s
     return await request.app.state.job_manager.enqueue(
         scan, ["rename", "upscale"],
         {"model": "RealESRGAN_x4plus_anime_6B", "model_scale": 4, "lanczos_scale": 0.5},
+    )
+
+
+@router.get("/mosaic/settings")
+def get_mosaic_settings(request: Request) -> dict[str, int | None]:
+    config = request.app.state.mosaic_config
+    value = request.app.state.personal_settings.mosaic_strength()
+    try:
+        config.validate_strength(value)
+    except Exception:
+        value = config.default
+    return {"value": value, "minimum": config.minimum, "maximum": config.maximum, "default": config.default}
+
+
+@router.post("/mosaic", status_code=status.HTTP_201_CREATED)
+async def create_mosaic_job(request: Request, body: MosaicJobRequest) -> dict[str, Any]:
+    scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
+    if not scan.can_start:
+        raise HTTPException(status_code=409, detail="事前検証に失敗したためジョブを登録できません。")
+    try:
+        strength = request.app.state.mosaic_config.validate_strength(body.mosaic_strength)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    request.app.state.personal_settings.save_mosaic_strength(strength)
+    return await request.app.state.job_manager.enqueue(
+        scan, ["rename", "mosaic"], {"mosaic_strength": strength, "workflow": "AutoMosaic"},
     )
 
 

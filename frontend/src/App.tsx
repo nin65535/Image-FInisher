@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { cancelJob, clearJobHistory, createRenameJob, createUpscaleJob, fetchHealth, fetchJobs, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
+import { cancelJob, clearJobHistory, createMosaicJob, createRenameJob, createUpscaleJob, fetchHealth, fetchJobs, fetchMosaicSettings, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
 
 type ConnectionState = "checking" | "connected" | "failed";
 
@@ -11,6 +11,9 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [upscaleEnabled, setUpscaleEnabled] = useState(true);
+  const [mosaicEnabled, setMosaicEnabled] = useState(false);
+  const [mosaicStrength, setMosaicStrength] = useState(200);
+  const [mosaicMinimum, setMosaicMinimum] = useState(10);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -24,6 +27,7 @@ export function App() {
   }, []);
 
   useEffect(() => { fetchJobs().then(setJobs).catch(() => undefined); }, []);
+  useEffect(() => { fetchMosaicSettings().then((value) => { setMosaicStrength(value.value); setMosaicMinimum(value.minimum); }).catch(() => undefined); }, []);
 
   useEffect(() => {
     const active = jobs.filter((job) => job.status === "queued" || job.status === "running" || job.status === "cancel_requested");
@@ -55,7 +59,9 @@ export function App() {
     if (!scan?.can_start) return;
     setBusy(true); setMessage(null);
     try {
-      const job = upscaleEnabled ? await createUpscaleJob(scan.input_folder) : await createRenameJob(scan.input_folder);
+      const job = mosaicEnabled
+        ? await createMosaicJob(scan.input_folder, mosaicStrength)
+        : upscaleEnabled ? await createUpscaleJob(scan.input_folder) : await createRenameJob(scan.input_folder);
       setJobs((current) => [job, ...current]);
     } catch (error) { setMessage(error instanceof Error ? error.message : "ジョブを登録できませんでした。"); }
     finally { setBusy(false); }
@@ -91,10 +97,16 @@ export function App() {
       </section>}
       <section className="card">
         <div className="section-heading"><div><p className="step">STEP 02</p><h2>拡大</h2></div></div>
-        <label><input type="checkbox" checked={upscaleEnabled} onChange={(event) => setUpscaleEnabled(event.target.checked)} /> 拡大を有効にする</label>
+        <label><input type="checkbox" checked={upscaleEnabled} onChange={(event) => { setUpscaleEnabled(event.target.checked); if (event.target.checked) setMosaicEnabled(false); }} /> 拡大を有効にする</label>
         <p className="empty">RealESRGAN_x4plus_anime_6Bで4倍拡大後、Lanczos 50%縮小。完成は元寸法の縦横各2倍です。</p>
       </section>
-      <button className="start" type="button" disabled={!scan?.can_start || busy} onClick={startJob}>{upscaleEnabled ? "リネーム＋拡大を開始" : "リネームを開始"}</button>
+      <section className="card">
+        <div className="section-heading"><div><p className="step">STEP 03</p><h2>モザイク</h2></div></div>
+        <label><input type="checkbox" checked={mosaicEnabled} onChange={(event) => { setMosaicEnabled(event.target.checked); if (event.target.checked) setUpscaleEnabled(false); }} /> AutoMosaicを有効にする</label>
+        <label>モザイク強度 <input type="number" min={mosaicMinimum} step={1} value={mosaicStrength} disabled={!mosaicEnabled} onChange={(event) => setMosaicStrength(Number(event.target.value))} /></label>
+        <p className="empty">処理後はBandiViewでモザイク範囲と品質を目視検品してください。</p>
+      </section>
+      <button className="start" type="button" disabled={!scan?.can_start || busy || (mosaicEnabled && (!Number.isInteger(mosaicStrength) || mosaicStrength < mosaicMinimum))} onClick={startJob}>{mosaicEnabled ? "リネーム＋モザイクを開始" : upscaleEnabled ? "リネーム＋拡大を開始" : "リネームを開始"}</button>
       <section className="card">
         <div className="section-heading"><div><p className="step">JOB HISTORY</p><h2>ジョブと進捗</h2></div><button type="button" className="secondary" onClick={clearHistory} disabled={!jobs.some((job) => ["completed", "failed", "cancelled"].includes(job.status))}>完了履歴をクリア</button></div>
         {jobs.length === 0 ? <p className="empty">保存されたジョブはありません。</p> : <div className="jobs">{jobs.map((job) => <article className="job" key={job.id}>

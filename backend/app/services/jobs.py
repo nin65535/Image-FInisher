@@ -13,6 +13,7 @@ from typing import Any
 from PIL import Image
 
 from backend.app.services.folder_scan import ScanResult
+from backend.app.services.mosaic import MosaicClient, execute_mosaic
 from backend.app.services.rename import execute_rename
 from backend.app.services.upscale import ComfyUIClient, execute_upscale
 
@@ -228,6 +229,46 @@ class JobStore:
                              "size": list(expected_size)}, ensure_ascii=False), image_id),
             )
 
+    def run_mosaic_image(self, job_id: str, image_id: int, client: MosaicClient, strength: int) -> None:
+        started = _now()
+        with self._lock, self._connect() as db:
+            image = db.execute("SELECT * FROM images WHERE id=? AND job_id=?", (image_id, job_id)).fetchone()
+            if image is None:
+                raise RuntimeError("処理対象の画像が見つかりません。")
+            db.execute("UPDATE images SET status='running', error=NULL WHERE id=?", (image_id,))
+            db.execute(
+                "UPDATE image_steps SET status='completed', started_at=?, finished_at=?, input_path=?, output_path=? "
+                "WHERE image_id=? AND name='rename'",
+                (started, started, image["source_path"], image["source_path"], image_id),
+            )
+            db.execute(
+                "UPDATE image_steps SET status='running', started_at=?, finished_at=NULL, error=NULL, "
+                "input_path=?, output_path=NULL WHERE image_id=? AND name='mosaic'",
+                (started, image["source_path"], image_id),
+            )
+        try:
+            source = Path(image["source_path"])
+            with Image.open(source) as opened:
+                expected_size = opened.size
+                opened.verify()
+            output_path = execute_mosaic(
+                client=client, source_path=image["source_path"], output_path=image["output_path"],
+                expected_size=expected_size, strength=strength, job_id=job_id, image_id=image_id,
+            )
+        except Exception as exc:
+            finished = _now()
+            with self._lock, self._connect() as db:
+                db.execute("UPDATE images SET status='failed', error=? WHERE id=?", (str(exc), image_id))
+                db.execute("UPDATE image_steps SET status='failed', finished_at=?, error=? WHERE image_id=? AND name='mosaic'",
+                           (finished, str(exc), image_id))
+            return
+        finished = _now()
+        with self._lock, self._connect() as db:
+            db.execute("UPDATE image_steps SET status='completed', finished_at=?, output_path=? WHERE image_id=? AND name='mosaic'",
+                       (finished, output_path, image_id))
+            db.execute("UPDATE images SET status='completed', error=NULL, validation_result=? WHERE id=?",
+                       (json.dumps({"format": "PNG", "size": list(expected_size), "mosaic_strength": strength}, ensure_ascii=False), image_id))
+
     def image_ids(self, job_id: str) -> list[int]:
         with self._connect() as db:
             return [row["id"] for row in db.execute("SELECT id FROM images WHERE job_id=? AND status='queued' ORDER BY ordinal", (job_id,))]
@@ -293,9 +334,11 @@ class JobStore:
 
 
 class JobManager:
-    def __init__(self, store: JobStore, upscale_client: ComfyUIClient | None = None) -> None:
+    def __init__(self, store: JobStore, upscale_client: ComfyUIClient | None = None,
+                 mosaic_client: MosaicClient | None = None) -> None:
         self.store = store
         self.upscale_client = upscale_client
+        self.mosaic_client = mosaic_client
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -353,7 +396,13 @@ class JobManager:
                     else:
                         snapshot = self.store.snapshot(job_id)
                         enabled = snapshot["enabled_steps"] if snapshot else []
-                        if "upscale" in enabled:
+                        if "mosaic" in enabled:
+                            if self.mosaic_client is None:
+                                raise RuntimeError("ComfyUI AutoMosaicサービスが設定されていません。")
+                            strength = snapshot["settings"].get("mosaic_strength")
+                            await asyncio.to_thread(self.store.run_mosaic_image, job_id, image_id,
+                                                    self.mosaic_client, strength)
+                        elif "upscale" in enabled:
                             if self.upscale_client is None:
                                 raise RuntimeError("ComfyUI拡大サービスが設定されていません。")
                             await asyncio.to_thread(self.store.run_upscale_image, job_id, image_id, self.upscale_client)

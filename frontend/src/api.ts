@@ -88,6 +88,20 @@ export async function createUpscaleJob(inputFolder: string): Promise<Job> {
   return parseResponse<Job>(response);
 }
 
+export type MosaicSettings = { value: number; minimum: number; maximum: number | null; default: number };
+
+export async function fetchMosaicSettings(): Promise<MosaicSettings> {
+  return parseResponse<MosaicSettings>(await fetch("/api/jobs/mosaic/settings"));
+}
+
+export async function createMosaicJob(inputFolder: string, mosaicStrength: number): Promise<Job> {
+  const response = await fetch("/api/jobs/mosaic", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input_folder: inputFolder, mosaic_strength: mosaicStrength })
+  });
+  return parseResponse<Job>(response);
+}
+
 export async function retryFailedImages(jobId: string): Promise<Job> {
   return parseResponse<Job>(await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" }));
 }

@@ -14,15 +14,20 @@ from backend.app.core.logging import configure_logging, register_request_logging
 
 
 from backend.app.services.jobs import JobManager, JobStore
+from backend.app.services.mosaic import MosaicClient, PersonalSettings, load_mosaic_config
 from backend.app.services.upscale import ComfyUIClient, load_upscale_config
 
 
 def create_app(frontend_dist: Path | None = None, data_dir: Path | None = None,
-               upscale_client: ComfyUIClient | None = None) -> FastAPI:
+               upscale_client: ComfyUIClient | None = None,
+               mosaic_client: MosaicClient | None = None) -> FastAPI:
     resolved_data = data_dir or Path.home() / "AppData" / "Local" / "ImageFinisher"
     app_root = Path(__file__).resolve().parents[2]
     store = JobStore(resolved_data / "jobs.sqlite3")
-    manager = JobManager(store, upscale_client or ComfyUIClient(load_upscale_config(app_root)))
+    mosaic_config = load_mosaic_config(app_root)
+    personal_settings = PersonalSettings(resolved_data / "settings.json", mosaic_config.default)
+    manager = JobManager(store, upscale_client or ComfyUIClient(load_upscale_config(app_root)),
+                         mosaic_client or MosaicClient(mosaic_config))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -38,6 +43,8 @@ def create_app(frontend_dist: Path | None = None, data_dir: Path | None = None,
     app.state.app_root = app_root
     app.state.job_store = store
     app.state.job_manager = manager
+    app.state.mosaic_config = mosaic_config
+    app.state.personal_settings = personal_settings
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
