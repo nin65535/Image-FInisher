@@ -14,6 +14,7 @@ from PIL import Image
 
 from backend.app.services.folder_scan import ScanResult
 from backend.app.services.rename import execute_rename
+from backend.app.services.upscale import ComfyUIClient, execute_upscale
 
 
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
@@ -178,6 +179,55 @@ class JobStore:
                 (json.dumps({"format": "PNG", "size": list(expected_size)}, ensure_ascii=False), image_id),
             )
 
+    def run_upscale_image(self, job_id: str, image_id: int, client: ComfyUIClient) -> None:
+        started = _now()
+        with self._lock, self._connect() as db:
+            image = db.execute("SELECT * FROM images WHERE id=? AND job_id=?", (image_id, job_id)).fetchone()
+            if image is None:
+                raise RuntimeError("処理対象の画像が見つかりません。")
+            db.execute("UPDATE images SET status='running', error=NULL WHERE id=?", (image_id,))
+            db.execute(
+                "UPDATE image_steps SET status='completed', started_at=?, finished_at=?, input_path=?, output_path=? "
+                "WHERE image_id=? AND name='rename'",
+                (started, started, image["source_path"], image["source_path"], image_id),
+            )
+            db.execute(
+                "UPDATE image_steps SET status='running', started_at=?, finished_at=NULL, error=NULL, "
+                "input_path=?, output_path=NULL WHERE image_id=? AND name='upscale'",
+                (started, image["source_path"], image_id),
+            )
+        try:
+            source = Path(image["source_path"])
+            with Image.open(source) as opened:
+                source_size = opened.size
+                opened.verify()
+            expected_size = (source_size[0] * 2, source_size[1] * 2)
+            output_path = execute_upscale(
+                client=client, source_path=image["source_path"], output_path=image["output_path"],
+                expected_size=expected_size, job_id=job_id, image_id=image_id,
+                output_subfolder=client.config.output_subfolder,
+            )
+        except Exception as exc:
+            finished = _now()
+            with self._lock, self._connect() as db:
+                db.execute("UPDATE images SET status='failed', error=? WHERE id=?", (str(exc), image_id))
+                db.execute(
+                    "UPDATE image_steps SET status='failed', finished_at=?, error=? "
+                    "WHERE image_id=? AND name='upscale'", (finished, str(exc), image_id),
+                )
+            return
+        finished = _now()
+        with self._lock, self._connect() as db:
+            db.execute(
+                "UPDATE image_steps SET status='completed', finished_at=?, output_path=? "
+                "WHERE image_id=? AND name='upscale'", (finished, output_path, image_id),
+            )
+            db.execute(
+                "UPDATE images SET status='completed', error=NULL, validation_result=? WHERE id=?",
+                (json.dumps({"format": "PNG", "source_size": list(source_size),
+                             "size": list(expected_size)}, ensure_ascii=False), image_id),
+            )
+
     def image_ids(self, job_id: str) -> list[int]:
         with self._connect() as db:
             return [row["id"] for row in db.execute("SELECT id FROM images WHERE job_id=? AND status='queued' ORDER BY ordinal", (job_id,))]
@@ -243,8 +293,9 @@ class JobStore:
 
 
 class JobManager:
-    def __init__(self, store: JobStore) -> None:
+    def __init__(self, store: JobStore, upscale_client: ComfyUIClient | None = None) -> None:
         self.store = store
+        self.upscale_client = upscale_client
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -300,7 +351,14 @@ class JobManager:
                     if self.store.is_test_job(job_id):
                         self.store.run_test_image(job_id, image_id)
                     else:
-                        self.store.run_rename_image(job_id, image_id)
+                        snapshot = self.store.snapshot(job_id)
+                        enabled = snapshot["enabled_steps"] if snapshot else []
+                        if "upscale" in enabled:
+                            if self.upscale_client is None:
+                                raise RuntimeError("ComfyUI拡大サービスが設定されていません。")
+                            await asyncio.to_thread(self.store.run_upscale_image, job_id, image_id, self.upscale_client)
+                        else:
+                            await asyncio.to_thread(self.store.run_rename_image, job_id, image_id)
                     await self._publish(job_id)
                     await asyncio.sleep(0)
                 else:

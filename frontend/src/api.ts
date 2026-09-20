@@ -80,6 +80,14 @@ export async function createRenameJob(inputFolder: string): Promise<Job> {
   return parseResponse<Job>(response);
 }
 
+export async function createUpscaleJob(inputFolder: string): Promise<Job> {
+  const response = await fetch("/api/jobs/upscale", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input_folder: inputFolder })
+  });
+  return parseResponse<Job>(response);
+}
+
 export async function retryFailedImages(jobId: string): Promise<Job> {
   return parseResponse<Job>(await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" }));
 }

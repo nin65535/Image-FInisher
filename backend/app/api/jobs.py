@@ -41,6 +41,17 @@ async def create_rename_job(request: Request, body: RenameJobRequest) -> dict[st
     return await request.app.state.job_manager.enqueue(scan, ["rename"], {})
 
 
+@router.post("/upscale", status_code=status.HTTP_201_CREATED)
+async def create_upscale_job(request: Request, body: RenameJobRequest) -> dict[str, Any]:
+    scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
+    if not scan.can_start:
+        raise HTTPException(status_code=409, detail="事前検証に失敗したためジョブを登録できません。")
+    return await request.app.state.job_manager.enqueue(
+        scan, ["rename", "upscale"],
+        {"model": "RealESRGAN_x4plus_anime_6B", "model_scale": 4, "lanczos_scale": 0.5},
+    )
+
+
 @router.get("")
 def list_jobs(request: Request) -> list[dict[str, Any]]:
     return request.app.state.job_store.list()

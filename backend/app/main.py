@@ -14,12 +14,15 @@ from backend.app.core.logging import configure_logging, register_request_logging
 
 
 from backend.app.services.jobs import JobManager, JobStore
+from backend.app.services.upscale import ComfyUIClient, load_upscale_config
 
 
-def create_app(frontend_dist: Path | None = None, data_dir: Path | None = None) -> FastAPI:
+def create_app(frontend_dist: Path | None = None, data_dir: Path | None = None,
+               upscale_client: ComfyUIClient | None = None) -> FastAPI:
     resolved_data = data_dir or Path.home() / "AppData" / "Local" / "ImageFinisher"
+    app_root = Path(__file__).resolve().parents[2]
     store = JobStore(resolved_data / "jobs.sqlite3")
-    manager = JobManager(store)
+    manager = JobManager(store, upscale_client or ComfyUIClient(load_upscale_config(app_root)))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -32,7 +35,7 @@ def create_app(frontend_dist: Path | None = None, data_dir: Path | None = None) 
     app = FastAPI(title="Image Finisher API", version="0.1.0", lifespan=lifespan)
     logger = configure_logging()
     app.state.logger = logger
-    app.state.app_root = Path(__file__).resolve().parents[2]
+    app.state.app_root = app_root
     app.state.job_store = store
     app.state.job_manager = manager
     app.add_middleware(

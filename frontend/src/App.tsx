@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { cancelJob, clearJobHistory, createRenameJob, fetchHealth, fetchJobs, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
+import { cancelJob, clearJobHistory, createRenameJob, createUpscaleJob, fetchHealth, fetchJobs, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
 
 type ConnectionState = "checking" | "connected" | "failed";
 
@@ -10,6 +10,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [upscaleEnabled, setUpscaleEnabled] = useState(true);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -50,11 +51,11 @@ export function App() {
     }
   }
 
-  async function startRenameJob() {
+  async function startJob() {
     if (!scan?.can_start) return;
     setBusy(true); setMessage(null);
     try {
-      const job = await createRenameJob(scan.input_folder);
+      const job = upscaleEnabled ? await createUpscaleJob(scan.input_folder) : await createRenameJob(scan.input_folder);
       setJobs((current) => [job, ...current]);
     } catch (error) { setMessage(error instanceof Error ? error.message : "ジョブを登録できませんでした。"); }
     finally { setBusy(false); }
@@ -88,7 +89,12 @@ export function App() {
         <div className="section-heading"><div><p className="step">NAMING PLAN</p><h2>グループと命名プレビュー</h2></div></div>
         <div className="groups">{scan.groups.map((group) => <article className="group" key={group.name}><div className="group-title"><h3>{group.name}</h3><span>{group.count}枚</span></div><table><thead><tr><th>元ファイル</th><th>完成名</th></tr></thead><tbody>{group.examples.map((image) => <tr key={image.source_path}><td>{image.source_name}</td><td>{image.output_name}</td></tr>)}</tbody></table></article>)}</div>
       </section>}
-      <button className="start" type="button" disabled={!scan?.can_start || busy} onClick={startRenameJob}>リネームを開始</button>
+      <section className="card">
+        <div className="section-heading"><div><p className="step">STEP 02</p><h2>拡大</h2></div></div>
+        <label><input type="checkbox" checked={upscaleEnabled} onChange={(event) => setUpscaleEnabled(event.target.checked)} /> 拡大を有効にする</label>
+        <p className="empty">RealESRGAN_x4plus_anime_6Bで4倍拡大後、Lanczos 50%縮小。完成は元寸法の縦横各2倍です。</p>
+      </section>
+      <button className="start" type="button" disabled={!scan?.can_start || busy} onClick={startJob}>{upscaleEnabled ? "リネーム＋拡大を開始" : "リネームを開始"}</button>
       <section className="card">
         <div className="section-heading"><div><p className="step">JOB HISTORY</p><h2>ジョブと進捗</h2></div><button type="button" className="secondary" onClick={clearHistory} disabled={!jobs.some((job) => ["completed", "failed", "cancelled"].includes(job.status))}>完了履歴をクリア</button></div>
         {jobs.length === 0 ? <p className="empty">保存されたジョブはありません。</p> : <div className="jobs">{jobs.map((job) => <article className="job" key={job.id}>
