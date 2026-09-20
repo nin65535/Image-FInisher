@@ -1,0 +1,42 @@
+{
+  "1": {
+    "inputs": {
+      "save_psd": false,
+      "filename_prefix": "AutoMosaic",
+      "confidence": 0.5,
+      "process_method": "mosaic",
+      "factor": 200,
+      "target_class": "pussy,penis",
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "AutoMosaic",
+    "_meta": {
+      "title": "Auto Mosaic"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "scene05_00005_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "画像を読み込む"
+    }
+  },
+  "3": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "画像を保存"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "application": "image-finisher",
+  "schemaVersion": 1,
+  "comfyui": {
+    "imageUpscale": {
+      "workflowPath": "external_configs/comfyui_workflows/image_upscale.json",
+      "nodes": {
+        "sourceImage": { "nodeId": "1", "inputName": "image" },
+        "output": { "nodeId": "4", "inputName": "filename_prefix" }
+      },
+      "outputSubfolder": "ImageFinisher/upscale",
+      "timeoutSeconds": 1200
+    },
+    "autoMosaic": {
+      "workflowPath": "external_configs/comfyui_workflows/mosaic.json",
+      "nodes": {
+        "sourceImage": { "nodeId": "2", "inputName": "image" },
+        "strength": { "nodeId": "1", "inputName": "factor" },
+        "output": { "nodeId": "3", "inputName": "filename_prefix" }
+      },
+      "strength": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": null,
+        "default": 200
+      },
+      "outputSubfolder": "ImageFinisher/mosaic",
+      "timeoutSeconds": 1200
+    }
+  }
+}
