@@ -1,0 +1,13 @@
+:root { color: #e8edf5; background: #0c111b; font-family: Inter, "Yu Gothic UI", sans-serif; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+main { min-height: 100vh; display: grid; place-items: center; padding: 32px; }
+.hero { width: min(720px, 100%); padding: 48px; border: 1px solid #273247; border-radius: 20px; background: #141c2a; box-shadow: 0 24px 70px rgb(0 0 0 / 30%); }
+.eyebrow { margin: 0 0 10px; color: #7fa7ff; font-size: 12px; font-weight: 700; letter-spacing: .16em; }
+h1 { margin: 0; font-size: clamp(36px, 7vw, 64px); line-height: 1.05; }
+.description { margin: 20px 0 32px; color: #aeb9cb; font-size: 17px; }
+.status { display: inline-flex; align-items: center; gap: 10px; color: #aeb9cb; }
+.status span { width: 10px; height: 10px; border-radius: 50%; background: #f2b84b; }
+.status--connected span { background: #45d49a; box-shadow: 0 0 14px #45d49a; }
+.status--failed span { background: #ef6a73; }
+@media (max-width: 600px) { .hero { padding: 30px 24px; } }
