@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.health import router as health_router
+from backend.app.api.folders import router as folders_router
 from backend.app.core.errors import register_exception_handlers
 from backend.app.core.logging import configure_logging, register_request_logging
 
@@ -14,6 +15,7 @@ def create_app(frontend_dist: Path | None = None) -> FastAPI:
     app = FastAPI(title="Image Finisher API", version="0.1.0")
     logger = configure_logging()
     app.state.logger = logger
+    app.state.app_root = Path(__file__).resolve().parents[2]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -24,6 +26,7 @@ def create_app(frontend_dist: Path | None = None) -> FastAPI:
     register_request_logging(app, logger)
     register_exception_handlers(app)
     app.include_router(health_router, prefix="/api")
+    app.include_router(folders_router, prefix="/api")
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def api_not_found(path: str) -> None:
