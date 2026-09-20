@@ -10,7 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from backend.app.services.folder_scan import ScanResult
+from backend.app.services.rename import execute_rename
 
 
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
@@ -133,9 +136,78 @@ class JobStore:
             )
             db.execute("UPDATE images SET status='completed', validation_result='test_job' WHERE id=?", (image_id,))
 
+    def run_rename_image(self, job_id: str, image_id: int) -> None:
+        started = _now()
+        with self._lock, self._connect() as db:
+            image = db.execute("SELECT * FROM images WHERE id=? AND job_id=?", (image_id, job_id)).fetchone()
+            if image is None:
+                raise RuntimeError("処理対象の画像が見つかりません。")
+            db.execute("UPDATE images SET status='running', error=NULL WHERE id=?", (image_id,))
+            db.execute(
+                "UPDATE image_steps SET status='running', started_at=?, finished_at=NULL, error=NULL, "
+                "input_path=?, output_path=NULL WHERE image_id=? AND name='rename'",
+                (started, image["source_path"], image_id),
+            )
+        try:
+            source = Path(image["source_path"])
+            with Image.open(source) as opened:
+                expected_size = opened.size
+                opened.verify()
+            output_path = execute_rename(
+                source_path=image["source_path"], output_path=image["output_path"],
+                expected_size=expected_size, job_id=job_id, image_id=image_id,
+            )
+        except Exception as exc:
+            finished = _now()
+            with self._lock, self._connect() as db:
+                db.execute("UPDATE images SET status='failed', error=? WHERE id=?", (str(exc), image_id))
+                db.execute(
+                    "UPDATE image_steps SET status='failed', finished_at=?, error=? "
+                    "WHERE image_id=? AND name='rename'",
+                    (finished, str(exc), image_id),
+                )
+            return
+        finished = _now()
+        with self._lock, self._connect() as db:
+            db.execute(
+                "UPDATE image_steps SET status='completed', finished_at=?, output_path=? "
+                "WHERE image_id=? AND name='rename'", (finished, output_path, image_id),
+            )
+            db.execute(
+                "UPDATE images SET status='completed', error=NULL, validation_result=? WHERE id=?",
+                (json.dumps({"format": "PNG", "size": list(expected_size)}, ensure_ascii=False), image_id),
+            )
+
     def image_ids(self, job_id: str) -> list[int]:
         with self._connect() as db:
-            return [row["id"] for row in db.execute("SELECT id FROM images WHERE job_id=? ORDER BY ordinal", (job_id,))]
+            return [row["id"] for row in db.execute("SELECT id FROM images WHERE job_id=? AND status='queued' ORDER BY ordinal", (job_id,))]
+
+    def is_test_job(self, job_id: str) -> bool:
+        with self._connect() as db:
+            row = db.execute("SELECT settings FROM jobs WHERE id=?", (job_id,)).fetchone()
+            return bool(row and json.loads(row["settings"]).get("_test_job"))
+
+    def prepare_failed_retry(self, job_id: str) -> bool:
+        with self._lock, self._connect() as db:
+            job = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if job is None or job["status"] != "failed":
+                return False
+            failed = db.execute("SELECT id FROM images WHERE job_id=? AND status='failed'", (job_id,)).fetchall()
+            if not failed:
+                return False
+            ids = [row["id"] for row in failed]
+            placeholders = ",".join("?" for _ in ids)
+            db.execute(
+                "UPDATE jobs SET status='queued', started_at=NULL, finished_at=NULL, error=NULL WHERE id=?", (job_id,)
+            )
+            db.execute(
+                f"UPDATE images SET status='queued', error=NULL, retry_count=retry_count+1 WHERE id IN ({placeholders})", ids
+            )
+            db.execute(
+                f"UPDATE image_steps SET status='queued', started_at=NULL, finished_at=NULL, error=NULL, "
+                f"input_path=NULL, output_path=NULL WHERE image_id IN ({placeholders})", ids
+            )
+            return True
 
     def snapshot(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
@@ -197,6 +269,12 @@ class JobManager:
         await self.queue.put(job_id)
         return self.store.snapshot(job_id) or {}
 
+    async def retry_failed(self, job_id: str) -> dict[str, Any] | None:
+        if not self.store.prepare_failed_retry(job_id):
+            return None
+        await self.queue.put(job_id)
+        return self.store.snapshot(job_id)
+
     async def cancel(self, job_id: str) -> bool:
         status = self.store.status(job_id)
         if status not in {"queued", "running"}:
@@ -219,11 +297,18 @@ class JobManager:
                     if self.store.status(job_id) == "cancel_requested":
                         self.store.set_job_status(job_id, "cancelled")
                         break
-                    self.store.run_test_image(job_id, image_id)
+                    if self.store.is_test_job(job_id):
+                        self.store.run_test_image(job_id, image_id)
+                    else:
+                        self.store.run_rename_image(job_id, image_id)
                     await self._publish(job_id)
                     await asyncio.sleep(0)
                 else:
-                    self.store.set_job_status(job_id, "completed")
+                    snapshot = self.store.snapshot(job_id)
+                    if snapshot and snapshot["counts"].get("failed", 0):
+                        self.store.set_job_status(job_id, "failed", error="一部の画像を処理できませんでした。")
+                    else:
+                        self.store.set_job_status(job_id, "completed")
                 await self._publish(job_id)
             except Exception as exc:
                 self.store.set_job_status(job_id, "failed", error=str(exc))

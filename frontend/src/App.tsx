@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { cancelJob, clearJobHistory, createTestJob, fetchHealth, fetchJobs, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
+import { cancelJob, clearJobHistory, createRenameJob, fetchHealth, fetchJobs, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
 
 type ConnectionState = "checking" | "connected" | "failed";
 
@@ -50,11 +50,11 @@ export function App() {
     }
   }
 
-  async function startTestJob() {
+  async function startRenameJob() {
     if (!scan?.can_start) return;
     setBusy(true); setMessage(null);
     try {
-      const job = await createTestJob(scan.input_folder);
+      const job = await createRenameJob(scan.input_folder);
       setJobs((current) => [job, ...current]);
     } catch (error) { setMessage(error instanceof Error ? error.message : "ジョブを登録できませんでした。"); }
     finally { setBusy(false); }
@@ -88,7 +88,7 @@ export function App() {
         <div className="section-heading"><div><p className="step">NAMING PLAN</p><h2>グループと命名プレビュー</h2></div></div>
         <div className="groups">{scan.groups.map((group) => <article className="group" key={group.name}><div className="group-title"><h3>{group.name}</h3><span>{group.count}枚</span></div><table><thead><tr><th>元ファイル</th><th>完成名</th></tr></thead><tbody>{group.examples.map((image) => <tr key={image.source_path}><td>{image.source_name}</td><td>{image.output_name}</td></tr>)}</tbody></table></article>)}</div>
       </section>}
-      <button className="start" type="button" disabled={!scan?.can_start || busy} onClick={startTestJob}>状態管理テストジョブを開始</button>
+      <button className="start" type="button" disabled={!scan?.can_start || busy} onClick={startRenameJob}>リネームを開始</button>
       <section className="card">
         <div className="section-heading"><div><p className="step">JOB HISTORY</p><h2>ジョブと進捗</h2></div><button type="button" className="secondary" onClick={clearHistory} disabled={!jobs.some((job) => ["completed", "failed", "cancelled"].includes(job.status))}>完了履歴をクリア</button></div>
         {jobs.length === 0 ? <p className="empty">保存されたジョブはありません。</p> : <div className="jobs">{jobs.map((job) => <article className="job" key={job.id}>
@@ -97,6 +97,7 @@ export function App() {
           <p>{job.input_folder}</p>
           <div className="job-counts"><span>成功 {job.counts.completed ?? 0}</span><span>失敗 {job.counts.failed ?? 0}</span><span>キャンセル {job.counts.cancelled ?? 0}</span></div>
           {(job.status === "queued" || job.status === "running") && <button type="button" className="danger" onClick={() => cancelJob(job.id).then((updated) => setJobs((current) => current.map((item) => item.id === updated.id ? updated : item)))}>キャンセル要求</button>}
+          {job.status === "failed" && job.images.some((image) => image.status === "failed") && <button type="button" className="secondary" onClick={() => retryFailedImages(job.id).then((updated) => setJobs((current) => current.map((item) => item.id === updated.id ? updated : item))).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "再実行できませんでした。"))}>失敗画像だけ再実行</button>}
           {job.error && <p className="job-error">{job.error}</p>}
           <details><summary>画像の詳細</summary><table><thead><tr><th>元画像</th><th>完成名</th><th>状態</th></tr></thead><tbody>{job.images.map((image) => <tr key={image.id}><td>{image.source_name}</td><td>{image.output_name}</td><td>{statusLabels[image.status]}</td></tr>)}</tbody></table></details>
         </article>)}</div>}

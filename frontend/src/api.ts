@@ -72,12 +72,16 @@ export async function scanFolder(path: string): Promise<ScanResult> {
   return parseResponse<ScanResult>(response);
 }
 
-export async function createTestJob(inputFolder: string): Promise<Job> {
-  const response = await fetch("/api/jobs/test", {
+export async function createRenameJob(inputFolder: string): Promise<Job> {
+  const response = await fetch("/api/jobs/rename", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ input_folder: inputFolder })
   });
   return parseResponse<Job>(response);
+}
+
+export async function retryFailedImages(jobId: string): Promise<Job> {
+  return parseResponse<Job>(await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" }));
 }
 
 export async function fetchJobs(): Promise<Job[]> {

@@ -25,7 +25,20 @@ async def create_test_job(request: Request, body: TestJobRequest) -> dict[str, A
     allowed = {"rename", "upscale", "mosaic"}
     if not body.enabled_steps or any(step not in allowed for step in body.enabled_steps):
         raise HTTPException(status_code=422, detail="有効工程の指定が不正です。")
-    return await request.app.state.job_manager.enqueue(scan, list(dict.fromkeys(body.enabled_steps)), body.settings)
+    settings = {**body.settings, "_test_job": True}
+    return await request.app.state.job_manager.enqueue(scan, list(dict.fromkeys(body.enabled_steps)), settings)
+
+
+class RenameJobRequest(BaseModel):
+    input_folder: str = Field(min_length=1)
+
+
+@router.post("/rename", status_code=status.HTTP_201_CREATED)
+async def create_rename_job(request: Request, body: RenameJobRequest) -> dict[str, Any]:
+    scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
+    if not scan.can_start:
+        raise HTTPException(status_code=409, detail="事前検証に失敗したためジョブを登録できません。")
+    return await request.app.state.job_manager.enqueue(scan, ["rename"], {})
 
 
 @router.get("")
@@ -55,6 +68,16 @@ async def cancel_job(request: Request, job_id: str) -> dict[str, Any]:
     if not await request.app.state.job_manager.cancel(job_id):
         raise HTTPException(status_code=409, detail="この状態のジョブはキャンセルできません。")
     return request.app.state.job_store.snapshot(job_id)
+
+
+@router.post("/{job_id}/retry")
+async def retry_failed_images(request: Request, job_id: str) -> dict[str, Any]:
+    if request.app.state.job_store.status(job_id) is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません。")
+    job = await request.app.state.job_manager.retry_failed(job_id)
+    if job is None:
+        raise HTTPException(status_code=409, detail="再実行できる失敗画像がありません。")
+    return job
 
 
 @router.delete("")
