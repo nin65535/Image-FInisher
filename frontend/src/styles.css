@@ -40,4 +40,17 @@ th, td { padding: 12px 18px; border-top: 1px solid #273247; text-align: left; }
 th { color: #8794a9; font-size: 12px; }
 td { overflow-wrap: anywhere; }
 .start { width: 100%; margin-top: 20px; padding: 15px; }
+.secondary { background: #2a3549; }
+.danger { margin-top: 14px; background: #8a3e4a; }
+.jobs { display: grid; gap: 14px; margin-top: 22px; }
+.job { padding: 18px; border: 1px solid #273247; border-radius: 12px; background: #101826; }
+.job .group-title { padding: 0; background: none; }
+.job .group-title div { display: grid; gap: 4px; }
+.job small, .job p, summary { color: #8794a9; }
+.job progress { width: 100%; margin-top: 14px; accent-color: #5684ed; }
+.job-counts { display: flex; flex-wrap: wrap; gap: 16px; color: #aeb9cb; font-size: 13px; }
+.job-error { color: #f2a7af !important; }
+details { margin-top: 15px; }
+summary { cursor: pointer; }
+details table { margin-top: 10px; }
 @media (max-width: 650px) { main { width: min(100% - 28px, 1120px); padding-top: 28px; } .hero, .section-heading { align-items: stretch; flex-direction: column; } .metrics { grid-template-columns: 1fr; } .paths div { grid-template-columns: 1fr; gap: 3px; } .card { padding: 20px; } }

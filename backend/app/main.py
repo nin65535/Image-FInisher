@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -7,15 +8,33 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.health import router as health_router
 from backend.app.api.folders import router as folders_router
+from backend.app.api.jobs import router as jobs_router
 from backend.app.core.errors import register_exception_handlers
 from backend.app.core.logging import configure_logging, register_request_logging
 
 
-def create_app(frontend_dist: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Image Finisher API", version="0.1.0")
+from backend.app.services.jobs import JobManager, JobStore
+
+
+def create_app(frontend_dist: Path | None = None, data_dir: Path | None = None) -> FastAPI:
+    resolved_data = data_dir or Path.home() / "AppData" / "Local" / "ImageFinisher"
+    store = JobStore(resolved_data / "jobs.sqlite3")
+    manager = JobManager(store)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        await manager.start()
+        try:
+            yield
+        finally:
+            await manager.stop()
+
+    app = FastAPI(title="Image Finisher API", version="0.1.0", lifespan=lifespan)
     logger = configure_logging()
     app.state.logger = logger
     app.state.app_root = Path(__file__).resolve().parents[2]
+    app.state.job_store = store
+    app.state.job_manager = manager
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -27,6 +46,7 @@ def create_app(frontend_dist: Path | None = None) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(health_router, prefix="/api")
     app.include_router(folders_router, prefix="/api")
+    app.include_router(jobs_router, prefix="/api")
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def api_not_found(path: str) -> None:

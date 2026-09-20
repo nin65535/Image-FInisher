@@ -96,7 +96,7 @@ def test_scan_api_returns_complete_plan(tmp_path: Path) -> None:
     input_folder.mkdir()
     _png(input_folder / "sample_123_.png")
 
-    with TestClient(create_app(frontend_dist=Path("missing"))) as client:
+    with TestClient(create_app(frontend_dist=Path("missing"), data_dir=tmp_path / "data")) as client:
         response = client.post("/api/folders/scan", json={"path": str(input_folder)})
 
     assert response.status_code == 200
@@ -105,9 +105,9 @@ def test_scan_api_returns_complete_plan(tmp_path: Path) -> None:
     assert body["images"][0]["output_name"] == "sample_0001.png"
 
 
-def test_folder_select_endpoint_can_be_cancelled(monkeypatch) -> None:
+def test_folder_select_endpoint_can_be_cancelled(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("backend.app.api.folders.pick_folder", lambda: None)
-    with TestClient(create_app(frontend_dist=Path("missing"))) as client:
+    with TestClient(create_app(frontend_dist=Path("missing"), data_dir=tmp_path / "data")) as client:
         response = client.post("/api/folders/select")
     assert response.status_code == 200
     assert response.json() == {"path": None}

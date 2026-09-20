@@ -1,0 +1,62 @@
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from backend.app.services.folder_scan import scan_folder
+
+
+router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+class TestJobRequest(BaseModel):
+    input_folder: str = Field(min_length=1)
+    enabled_steps: list[str] = Field(default_factory=lambda: ["rename", "upscale", "mosaic"])
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/test", status_code=status.HTTP_201_CREATED)
+async def create_test_job(request: Request, body: TestJobRequest) -> dict[str, Any]:
+    scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
+    if not scan.can_start:
+        raise HTTPException(status_code=409, detail="事前検証に失敗したためジョブを登録できません。")
+    allowed = {"rename", "upscale", "mosaic"}
+    if not body.enabled_steps or any(step not in allowed for step in body.enabled_steps):
+        raise HTTPException(status_code=422, detail="有効工程の指定が不正です。")
+    return await request.app.state.job_manager.enqueue(scan, list(dict.fromkeys(body.enabled_steps)), body.settings)
+
+
+@router.get("")
+def list_jobs(request: Request) -> list[dict[str, Any]]:
+    return request.app.state.job_store.list()
+
+
+@router.get("/{job_id}")
+def get_job(request: Request, job_id: str) -> dict[str, Any]:
+    job = request.app.state.job_store.snapshot(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません。")
+    return job
+
+
+@router.get("/{job_id}/events")
+def job_events(request: Request, job_id: str) -> StreamingResponse:
+    if request.app.state.job_store.status(job_id) is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません。")
+    return StreamingResponse(request.app.state.job_manager.events(job_id), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/{job_id}/cancel")
+async def cancel_job(request: Request, job_id: str) -> dict[str, Any]:
+    if request.app.state.job_store.status(job_id) is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません。")
+    if not await request.app.state.job_manager.cancel(job_id):
+        raise HTTPException(status_code=409, detail="この状態のジョブはキャンセルできません。")
+    return request.app.state.job_store.snapshot(job_id)
+
+
+@router.delete("")
+def clear_history(request: Request) -> dict[str, int]:
+    return {"deleted_count": request.app.state.job_store.clear_terminal()}

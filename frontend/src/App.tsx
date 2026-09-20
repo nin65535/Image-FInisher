@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { fetchHealth, scanFolder, selectFolder, type ScanResult } from "./api";
+import { cancelJob, clearJobHistory, createTestJob, fetchHealth, fetchJobs, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
 
 type ConnectionState = "checking" | "connected" | "failed";
 
@@ -9,6 +9,7 @@ export function App() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -21,6 +22,21 @@ export function App() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => { fetchJobs().then(setJobs).catch(() => undefined); }, []);
+
+  useEffect(() => {
+    const active = jobs.filter((job) => job.status === "queued" || job.status === "running" || job.status === "cancel_requested");
+    const streams = active.map((job) => {
+      const stream = new EventSource(`/api/jobs/${job.id}/events`);
+      stream.addEventListener("job", (event) => {
+        const updated = JSON.parse((event as MessageEvent<string>).data) as Job;
+        setJobs((current) => [updated, ...current.filter((item) => item.id !== updated.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      });
+      return stream;
+    });
+    return () => streams.forEach((stream) => stream.close());
+  }, [jobs.map((job) => `${job.id}:${job.status}`).join("|")]);
+
   async function chooseInput() {
     setBusy(true);
     setMessage(null);
@@ -32,6 +48,21 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function startTestJob() {
+    if (!scan?.can_start) return;
+    setBusy(true); setMessage(null);
+    try {
+      const job = await createTestJob(scan.input_folder);
+      setJobs((current) => [job, ...current]);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "ジョブを登録できませんでした。"); }
+    finally { setBusy(false); }
+  }
+
+  async function clearHistory() {
+    try { await clearJobHistory(); setJobs((current) => current.filter((job) => !["completed", "failed", "cancelled"].includes(job.status))); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "履歴をクリアできませんでした。"); }
   }
 
   const labels: Record<ConnectionState, string> = { checking: "APIを確認中", connected: "API接続済み", failed: "APIに接続できません" };
@@ -57,7 +88,21 @@ export function App() {
         <div className="section-heading"><div><p className="step">NAMING PLAN</p><h2>グループと命名プレビュー</h2></div></div>
         <div className="groups">{scan.groups.map((group) => <article className="group" key={group.name}><div className="group-title"><h3>{group.name}</h3><span>{group.count}枚</span></div><table><thead><tr><th>元ファイル</th><th>完成名</th></tr></thead><tbody>{group.examples.map((image) => <tr key={image.source_path}><td>{image.source_name}</td><td>{image.output_name}</td></tr>)}</tbody></table></article>)}</div>
       </section>}
-      <button className="start" type="button" disabled={!scan?.can_start}>処理を開始（フェーズ3以降で有効）</button>
+      <button className="start" type="button" disabled={!scan?.can_start || busy} onClick={startTestJob}>状態管理テストジョブを開始</button>
+      <section className="card">
+        <div className="section-heading"><div><p className="step">JOB HISTORY</p><h2>ジョブと進捗</h2></div><button type="button" className="secondary" onClick={clearHistory} disabled={!jobs.some((job) => ["completed", "failed", "cancelled"].includes(job.status))}>完了履歴をクリア</button></div>
+        {jobs.length === 0 ? <p className="empty">保存されたジョブはありません。</p> : <div className="jobs">{jobs.map((job) => <article className="job" key={job.id}>
+          <div className="group-title"><div><strong>{statusLabels[job.status]}</strong><small>{new Date(job.created_at).toLocaleString("ja-JP")} · {job.id.slice(0, 8)}</small></div><span>{job.processed_count} / {job.total_count}枚</span></div>
+          <progress value={job.processed_count} max={job.total_count || 1} />
+          <p>{job.input_folder}</p>
+          <div className="job-counts"><span>成功 {job.counts.completed ?? 0}</span><span>失敗 {job.counts.failed ?? 0}</span><span>キャンセル {job.counts.cancelled ?? 0}</span></div>
+          {(job.status === "queued" || job.status === "running") && <button type="button" className="danger" onClick={() => cancelJob(job.id).then((updated) => setJobs((current) => current.map((item) => item.id === updated.id ? updated : item)))}>キャンセル要求</button>}
+          {job.error && <p className="job-error">{job.error}</p>}
+          <details><summary>画像の詳細</summary><table><thead><tr><th>元画像</th><th>完成名</th><th>状態</th></tr></thead><tbody>{job.images.map((image) => <tr key={image.id}><td>{image.source_name}</td><td>{image.output_name}</td><td>{statusLabels[image.status]}</td></tr>)}</tbody></table></details>
+        </article>)}</div>}
+      </section>
     </main>
   );
 }
+
+const statusLabels = { queued: "待機中", running: "実行中", completed: "完了", failed: "失敗", cancel_requested: "キャンセル要求中", cancelled: "キャンセル" } as const;
