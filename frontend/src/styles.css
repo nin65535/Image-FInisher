@@ -31,7 +31,10 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .alert ul { margin: 10px 0 0; padding-left: 22px; }
 .alert li + li { margin-top: 8px; }
 .alert small { display: block; color: #b77d85; overflow-wrap: anywhere; }
-.groups { display: grid; gap: 16px; margin-top: 22px; }
+.naming-preview { max-height: calc(45px * 11); margin-top: 22px; overflow: auto; border: 1px solid #273247; border-radius: 12px; }
+.naming-preview thead { position: sticky; top: 0; z-index: 1; background: #101826; }
+.naming-preview th:first-child, .naming-preview td:first-child { width: 22%; }
+.preview-omitted { margin: 12px 0 0; color: #8794a9; font-size: 13px; }
 .group { overflow: hidden; border: 1px solid #273247; border-radius: 12px; }
 .group-title { padding: 16px 18px; background: #101826; }
 .group-title span { color: #aeb9cb; }

@@ -44,6 +44,12 @@ class PipelineJobRequest(RenameJobRequest):
     mosaic_strength: int | None = None
 
 
+class PipelineSettingsRequest(BaseModel):
+    rename: bool
+    upscale: bool
+    mosaic: bool
+
+
 @router.post("/pipeline", status_code=status.HTTP_201_CREATED)
 async def create_pipeline_job(request: Request, body: PipelineJobRequest) -> dict[str, Any]:
     scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
@@ -93,6 +99,19 @@ def get_mosaic_settings(request: Request) -> dict[str, int | None]:
     except Exception:
         value = config.default
     return {"value": value, "minimum": config.minimum, "maximum": config.maximum, "default": config.default}
+
+
+@router.get("/pipeline/settings")
+def get_pipeline_settings(request: Request) -> dict[str, bool]:
+    return request.app.state.personal_settings.pipeline_steps()
+
+
+@router.put("/pipeline/settings")
+def update_pipeline_settings(request: Request, body: PipelineSettingsRequest) -> dict[str, bool]:
+    request.app.state.personal_settings.save_pipeline_steps(
+        rename=body.rename, upscale=body.upscale, mosaic=body.mosaic,
+    )
+    return body.model_dump()
 
 
 @router.post("/mosaic", status_code=status.HTTP_201_CREATED)

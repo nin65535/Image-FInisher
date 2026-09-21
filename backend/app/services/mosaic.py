@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import shutil
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,24 +153,43 @@ def execute_mosaic(*, client: MosaicClient, source_path: str, output_path: str,
 class PersonalSettings:
     def __init__(self, path: Path, default_strength: int) -> None:
         self.path, self.default_strength = path, default_strength
+        self._lock = threading.Lock()
 
-    def mosaic_strength(self) -> int:
-        try:
-            value = json.loads(self.path.read_text(encoding="utf-8")).get("mosaic_strength")
-            return value if isinstance(value, int) and not isinstance(value, bool) else self.default_strength
-        except (OSError, json.JSONDecodeError, AttributeError):
-            return self.default_strength
-
-    def save_mosaic_strength(self, value: int) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        data: dict[str, object] = {}
+    def _load(self) -> dict[str, object]:
         try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                data = loaded
+            return loaded if isinstance(loaded, dict) else {}
         except (OSError, json.JSONDecodeError):
-            pass
-        data["mosaic_strength"] = value
+            return {}
+
+    def _save(self, data: dict[str, object]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, self.path)
+
+    def mosaic_strength(self) -> int:
+        value = self._load().get("mosaic_strength")
+        return value if isinstance(value, int) and not isinstance(value, bool) else self.default_strength
+
+    def save_mosaic_strength(self, value: int) -> None:
+        with self._lock:
+            data = self._load()
+            data["mosaic_strength"] = value
+            self._save(data)
+
+    def pipeline_steps(self) -> dict[str, bool]:
+        defaults = {"rename": True, "upscale": True, "mosaic": False}
+        value = self._load().get("pipeline_steps")
+        if not isinstance(value, dict):
+            return defaults
+        return {
+            name: selected if isinstance((selected := value.get(name)), bool) else default
+            for name, default in defaults.items()
+        }
+
+    def save_pipeline_steps(self, *, rename: bool, upscale: bool, mosaic: bool) -> None:
+        with self._lock:
+            data = self._load()
+            data["pipeline_steps"] = {"rename": rename, "upscale": upscale, "mosaic": mosaic}
+            self._save(data)

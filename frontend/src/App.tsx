@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 
-import { cancelJob, clearJobHistory, createPipelineJob, fetchHealth, fetchJobs, fetchMosaicSettings, openOutputFolder, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
+import { cancelJob, clearJobHistory, createPipelineJob, fetchHealth, fetchJobs, fetchMosaicSettings, fetchPipelineSettings, openOutputFolder, retryFailedImages, savePipelineSettings, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
 
 type ConnectionState = "checking" | "connected" | "failed";
+const NAMING_PREVIEW_LIMIT = 100;
 
 export function App() {
   const [connection, setConnection] = useState<ConnectionState>("checking");
@@ -15,6 +16,7 @@ export function App() {
   const [mosaicEnabled, setMosaicEnabled] = useState(false);
   const [mosaicStrength, setMosaicStrength] = useState(200);
   const [mosaicMinimum, setMosaicMinimum] = useState(10);
+  const [pipelineSettingsLoaded, setPipelineSettingsLoaded] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -29,6 +31,21 @@ export function App() {
 
   useEffect(() => { fetchJobs().then(setJobs).catch(() => undefined); }, []);
   useEffect(() => { fetchMosaicSettings().then((value) => { setMosaicStrength(value.value); setMosaicMinimum(value.minimum); }).catch(() => undefined); }, []);
+  useEffect(() => {
+    fetchPipelineSettings()
+      .then((value) => { setRenameEnabled(value.rename); setUpscaleEnabled(value.upscale); setMosaicEnabled(value.mosaic); })
+      .catch(() => undefined)
+      .finally(() => setPipelineSettingsLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    if (!pipelineSettingsLoaded) return;
+    const timer = window.setTimeout(() => {
+      savePipelineSettings({ rename: renameEnabled, upscale: upscaleEnabled, mosaic: mosaicEnabled })
+        .catch(() => setMessage("工程設定を個人設定へ保存できませんでした。"));
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [pipelineSettingsLoaded, renameEnabled, upscaleEnabled, mosaicEnabled]);
 
   useEffect(() => {
     const lifecycle = new EventSource("/api/lifecycle/events");
@@ -79,6 +96,8 @@ export function App() {
   }
 
   const labels: Record<ConnectionState, string> = { checking: "APIを確認中", connected: "API接続済み", failed: "APIに接続できません" };
+  const namingPreview = scan?.images.slice(0, NAMING_PREVIEW_LIMIT) ?? [];
+  const omittedNamingCount = Math.max(0, (scan?.images.length ?? 0) - namingPreview.length);
   return (
     <main>
       <header className="hero">
@@ -99,7 +118,8 @@ export function App() {
       </section>
       {scan && scan.groups.length > 0 && <section className="card">
         <div className="section-heading"><div><p className="step">NAMING PLAN</p><h2>グループと命名プレビュー</h2></div></div>
-        <div className="groups">{scan.groups.map((group) => <article className="group" key={group.name}><div className="group-title"><h3>{group.name}</h3><span>{group.count}枚</span></div><table><thead><tr><th>元ファイル</th><th>完成名</th></tr></thead><tbody>{group.examples.map((image) => <tr key={image.source_path}><td>{image.source_name}</td><td>{image.output_name}</td></tr>)}</tbody></table></article>)}</div>
+        <div className="naming-preview"><table><thead><tr><th>グループ</th><th>元ファイル</th><th>完成名</th></tr></thead><tbody>{namingPreview.map((image) => <tr key={image.source_path}><td>{image.group}</td><td>{image.source_name}</td><td>{image.output_name}</td></tr>)}</tbody></table></div>
+        {omittedNamingCount > 0 && <p className="preview-omitted">全体の先頭100件を表示しています。101件目以降の{omittedNamingCount}件は省略しました。</p>}
       </section>}
       <section className="card">
         <div className="section-heading"><div><p className="step">STEP 02</p><h2>リネーム</h2></div></div>

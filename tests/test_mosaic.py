@@ -88,3 +88,34 @@ def test_personal_setting_is_restored(tmp_path: Path) -> None:
     settings = PersonalSettings(path, 200)
     settings.save_mosaic_strength(333)
     assert PersonalSettings(path, 200).mosaic_strength() == 333
+
+
+def test_pipeline_checkbox_settings_are_saved_and_restored(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    settings = PersonalSettings(path, 200)
+    assert settings.pipeline_steps() == {"rename": True, "upscale": True, "mosaic": False}
+
+    settings.save_pipeline_steps(rename=False, upscale=True, mosaic=True)
+
+    restored = PersonalSettings(path, 200)
+    assert restored.pipeline_steps() == {"rename": False, "upscale": True, "mosaic": True}
+    restored.save_mosaic_strength(321)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["pipeline_steps"] == {"rename": False, "upscale": True, "mosaic": True}
+    assert saved["mosaic_strength"] == 321
+
+
+def test_pipeline_settings_api_updates_personal_settings(tmp_path: Path) -> None:
+    app = create_app(frontend_dist=Path("missing"), data_dir=tmp_path / "data",
+                     mosaic_client=FakeMosaicClient())  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        assert client.get("/api/jobs/pipeline/settings").json() == {
+            "rename": True, "upscale": True, "mosaic": False,
+        }
+        response = client.put("/api/jobs/pipeline/settings", json={
+            "rename": False, "upscale": False, "mosaic": True,
+        })
+        assert response.status_code == 200
+        assert client.get("/api/jobs/pipeline/settings").json() == {
+            "rename": False, "upscale": False, "mosaic": True,
+        }

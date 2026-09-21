@@ -89,9 +89,20 @@ export async function createUpscaleJob(inputFolder: string): Promise<Job> {
 }
 
 export type MosaicSettings = { value: number; minimum: number; maximum: number | null; default: number };
+export type PipelineSettings = { rename: boolean; upscale: boolean; mosaic: boolean };
 
 export async function fetchMosaicSettings(): Promise<MosaicSettings> {
   return parseResponse<MosaicSettings>(await fetch("/api/jobs/mosaic/settings"));
+}
+
+export async function fetchPipelineSettings(): Promise<PipelineSettings> {
+  return parseResponse<PipelineSettings>(await fetch("/api/jobs/pipeline/settings"));
+}
+
+export async function savePipelineSettings(settings: PipelineSettings): Promise<PipelineSettings> {
+  return parseResponse<PipelineSettings>(await fetch("/api/jobs/pipeline/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings)
+  }));
 }
 
 export async function createMosaicJob(inputFolder: string, mosaicStrength: number): Promise<Job> {

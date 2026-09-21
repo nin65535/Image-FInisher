@@ -5,10 +5,10 @@ Set-Location $repositoryRoot
 $python = Join-Path $repositoryRoot '.venv\Scripts\python.exe'
 $frontend = Join-Path $repositoryRoot 'frontend\dist\index.html'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-    throw '.venv がありません。READMEの初回セットアップを実行してください。'
+    throw '.venv was not found. Run the initial setup described in README.md.'
 }
 if (-not (Test-Path -LiteralPath $frontend -PathType Leaf)) {
-    throw 'frontend/dist がありません。先に .\scripts\build.ps1 を実行してください。'
+    throw 'frontend/dist was not found. Run .\scripts\build.ps1 first.'
 }
 
 & $python -m backend.run
