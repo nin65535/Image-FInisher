@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { cancelJob, clearJobHistory, createMosaicJob, createRenameJob, createUpscaleJob, fetchHealth, fetchJobs, fetchMosaicSettings, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
+import { cancelJob, clearJobHistory, createPipelineJob, fetchHealth, fetchJobs, fetchMosaicSettings, openOutputFolder, retryFailedImages, scanFolder, selectFolder, type Job, type ScanResult } from "./api";
 
 type ConnectionState = "checking" | "connected" | "failed";
 
@@ -10,6 +10,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [renameEnabled, setRenameEnabled] = useState(true);
   const [upscaleEnabled, setUpscaleEnabled] = useState(true);
   const [mosaicEnabled, setMosaicEnabled] = useState(false);
   const [mosaicStrength, setMosaicStrength] = useState(200);
@@ -59,9 +60,9 @@ export function App() {
     if (!scan?.can_start) return;
     setBusy(true); setMessage(null);
     try {
-      const job = mosaicEnabled
-        ? await createMosaicJob(scan.input_folder, mosaicStrength)
-        : upscaleEnabled ? await createUpscaleJob(scan.input_folder) : await createRenameJob(scan.input_folder);
+      const job = await createPipelineJob(scan.input_folder, {
+        rename: renameEnabled, upscale: upscaleEnabled, mosaic: mosaicEnabled
+      }, mosaicStrength);
       setJobs((current) => [job, ...current]);
     } catch (error) { setMessage(error instanceof Error ? error.message : "ジョブを登録できませんでした。"); }
     finally { setBusy(false); }
@@ -96,17 +97,22 @@ export function App() {
         <div className="groups">{scan.groups.map((group) => <article className="group" key={group.name}><div className="group-title"><h3>{group.name}</h3><span>{group.count}枚</span></div><table><thead><tr><th>元ファイル</th><th>完成名</th></tr></thead><tbody>{group.examples.map((image) => <tr key={image.source_path}><td>{image.source_name}</td><td>{image.output_name}</td></tr>)}</tbody></table></article>)}</div>
       </section>}
       <section className="card">
-        <div className="section-heading"><div><p className="step">STEP 02</p><h2>拡大</h2></div></div>
-        <label><input type="checkbox" checked={upscaleEnabled} onChange={(event) => { setUpscaleEnabled(event.target.checked); if (event.target.checked) setMosaicEnabled(false); }} /> 拡大を有効にする</label>
+        <div className="section-heading"><div><p className="step">STEP 02</p><h2>リネーム</h2></div></div>
+        <label><input type="checkbox" checked={renameEnabled} onChange={(event) => setRenameEnabled(event.target.checked)} /> リネームを有効にする</label>
+        <p className="empty">グループごとに元ファイル名順で4桁連番へ整理します。</p>
+      </section>
+      <section className="card">
+        <div className="section-heading"><div><p className="step">STEP 03</p><h2>拡大</h2></div></div>
+        <label><input type="checkbox" checked={upscaleEnabled} onChange={(event) => setUpscaleEnabled(event.target.checked)} /> 拡大を有効にする</label>
         <p className="empty">RealESRGAN_x4plus_anime_6Bで4倍拡大後、Lanczos 50%縮小。完成は元寸法の縦横各2倍です。</p>
       </section>
       <section className="card">
-        <div className="section-heading"><div><p className="step">STEP 03</p><h2>モザイク</h2></div></div>
-        <label><input type="checkbox" checked={mosaicEnabled} onChange={(event) => { setMosaicEnabled(event.target.checked); if (event.target.checked) setUpscaleEnabled(false); }} /> AutoMosaicを有効にする</label>
+        <div className="section-heading"><div><p className="step">STEP 04</p><h2>モザイク</h2></div></div>
+        <label><input type="checkbox" checked={mosaicEnabled} onChange={(event) => setMosaicEnabled(event.target.checked)} /> AutoMosaicを有効にする</label>
         <label>モザイク強度 <input type="number" min={mosaicMinimum} step={1} value={mosaicStrength} disabled={!mosaicEnabled} onChange={(event) => setMosaicStrength(Number(event.target.value))} /></label>
         <p className="empty">処理後はBandiViewでモザイク範囲と品質を目視検品してください。</p>
       </section>
-      <button className="start" type="button" disabled={!scan?.can_start || busy || (mosaicEnabled && (!Number.isInteger(mosaicStrength) || mosaicStrength < mosaicMinimum))} onClick={startJob}>{mosaicEnabled ? "リネーム＋モザイクを開始" : upscaleEnabled ? "リネーム＋拡大を開始" : "リネームを開始"}</button>
+      <button className="start" type="button" disabled={!scan?.can_start || busy || !(renameEnabled || upscaleEnabled || mosaicEnabled) || (mosaicEnabled && (!Number.isInteger(mosaicStrength) || mosaicStrength < mosaicMinimum))} onClick={startJob}>{[renameEnabled && "リネーム", upscaleEnabled && "拡大", mosaicEnabled && "モザイク"].filter(Boolean).join("＋") || "工程未選択"}を開始</button>
       <section className="card">
         <div className="section-heading"><div><p className="step">JOB HISTORY</p><h2>ジョブと進捗</h2></div><button type="button" className="secondary" onClick={clearHistory} disabled={!jobs.some((job) => ["completed", "failed", "cancelled"].includes(job.status))}>完了履歴をクリア</button></div>
         {jobs.length === 0 ? <p className="empty">保存されたジョブはありません。</p> : <div className="jobs">{jobs.map((job) => <article className="job" key={job.id}>
@@ -116,8 +122,9 @@ export function App() {
           <div className="job-counts"><span>成功 {job.counts.completed ?? 0}</span><span>失敗 {job.counts.failed ?? 0}</span><span>キャンセル {job.counts.cancelled ?? 0}</span></div>
           {(job.status === "queued" || job.status === "running") && <button type="button" className="danger" onClick={() => cancelJob(job.id).then((updated) => setJobs((current) => current.map((item) => item.id === updated.id ? updated : item)))}>キャンセル要求</button>}
           {job.status === "failed" && job.images.some((image) => image.status === "failed") && <button type="button" className="secondary" onClick={() => retryFailedImages(job.id).then((updated) => setJobs((current) => current.map((item) => item.id === updated.id ? updated : item))).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "再実行できませんでした。"))}>失敗画像だけ再実行</button>}
+          {job.counts.completed > 0 && <button type="button" className="secondary action-button" onClick={() => openOutputFolder(job.id).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "完成フォルダを開けませんでした。"))}>完成フォルダを開く</button>}
           {job.error && <p className="job-error">{job.error}</p>}
-          <details><summary>画像の詳細</summary><table><thead><tr><th>元画像</th><th>完成名</th><th>状態</th></tr></thead><tbody>{job.images.map((image) => <tr key={image.id}><td>{image.source_name}</td><td>{image.output_name}</td><td>{statusLabels[image.status]}</td></tr>)}</tbody></table></details>
+          <details><summary>画像の詳細</summary><table><thead><tr><th>元画像</th><th>完成名</th><th>状態</th><th>工程</th></tr></thead><tbody>{job.images.map((image) => <tr key={image.id}><td>{image.source_name}</td><td>{image.output_name}</td><td>{statusLabels[image.status]}</td><td>{image.steps.map((step) => `${step.name}: ${statusLabels[step.status]}`).join(" / ")}{image.error && <small className="step-error">{image.error}</small>}</td></tr>)}</tbody></table></details>
         </article>)}</div>}
       </section>
     </main>

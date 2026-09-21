@@ -42,6 +42,8 @@ td { overflow-wrap: anywhere; }
 .start { width: 100%; margin-top: 20px; padding: 15px; }
 .secondary { background: #2a3549; }
 .danger { margin-top: 14px; background: #8a3e4a; }
+.action-button { margin: 14px 0 0 10px; }
+.step-error { display: block; margin-top: 4px; color: #f2a7af !important; }
 .jobs { display: grid; gap: 14px; margin-top: 22px; }
 .job { padding: 18px; border: 1px solid #273247; border-radius: 12px; background: #101826; }
 .job .group-title { padding: 0; background: none; }

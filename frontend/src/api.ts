@@ -102,6 +102,14 @@ export async function createMosaicJob(inputFolder: string, mosaicStrength: numbe
   return parseResponse<Job>(response);
 }
 
+export async function createPipelineJob(inputFolder: string, steps: { rename: boolean; upscale: boolean; mosaic: boolean }, mosaicStrength: number): Promise<Job> {
+  const response = await fetch("/api/jobs/pipeline", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input_folder: inputFolder, ...steps, mosaic_strength: steps.mosaic ? mosaicStrength : null })
+  });
+  return parseResponse<Job>(response);
+}
+
 export async function retryFailedImages(jobId: string): Promise<Job> {
   return parseResponse<Job>(await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" }));
 }
@@ -117,4 +125,8 @@ export async function clearJobHistory(): Promise<number> {
 
 export async function cancelJob(jobId: string): Promise<Job> {
   return parseResponse<Job>(await fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" }));
+}
+
+export async function openOutputFolder(jobId: string): Promise<void> {
+  await parseResponse<{ path: string }>(await fetch(`/api/jobs/${jobId}/open-output`, { method: "POST" }));
 }

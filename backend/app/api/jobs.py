@@ -37,6 +37,34 @@ class MosaicJobRequest(RenameJobRequest):
     mosaic_strength: int
 
 
+class PipelineJobRequest(RenameJobRequest):
+    rename: bool = True
+    upscale: bool = True
+    mosaic: bool = False
+    mosaic_strength: int | None = None
+
+
+@router.post("/pipeline", status_code=status.HTTP_201_CREATED)
+async def create_pipeline_job(request: Request, body: PipelineJobRequest) -> dict[str, Any]:
+    scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
+    if not scan.can_start:
+        raise HTTPException(status_code=409, detail="事前検証に失敗したためジョブを登録できません。")
+    enabled = [name for name, selected in (("rename", body.rename), ("upscale", body.upscale), ("mosaic", body.mosaic)) if selected]
+    if not enabled:
+        raise HTTPException(status_code=422, detail="工程を1つ以上有効にしてください。")
+    settings: dict[str, Any] = {}
+    if body.upscale:
+        settings.update({"model": "RealESRGAN_x4plus_anime_6B", "model_scale": 4, "lanczos_scale": 0.5})
+    if body.mosaic:
+        try:
+            strength = request.app.state.mosaic_config.validate_strength(body.mosaic_strength)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        settings.update({"mosaic_strength": strength, "workflow": "AutoMosaic"})
+        request.app.state.personal_settings.save_mosaic_strength(strength)
+    return await request.app.state.job_manager.enqueue(scan, enabled, settings)
+
+
 @router.post("/rename", status_code=status.HTTP_201_CREATED)
 async def create_rename_job(request: Request, body: RenameJobRequest) -> dict[str, Any]:
     scan = scan_folder(Path(body.input_folder), app_root=request.app.state.app_root)
@@ -119,6 +147,22 @@ async def retry_failed_images(request: Request, job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=409, detail="再実行できる失敗画像がありません。")
     return job
+
+
+@router.post("/{job_id}/open-output")
+def open_output_folder(request: Request, job_id: str) -> dict[str, str]:
+    job = request.app.state.job_store.snapshot(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません。")
+    folder = Path(job["output_folder"])
+    if not folder.is_dir():
+        raise HTTPException(status_code=409, detail="完成フォルダがまだ存在しません。")
+    try:
+        import os
+        os.startfile(folder)  # type: ignore[attr-defined]
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"完成フォルダを開けません: {exc}") from exc
+    return {"path": str(folder)}
 
 
 @router.delete("")
