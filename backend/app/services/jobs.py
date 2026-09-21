@@ -125,6 +125,15 @@ class JobStore:
             row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
             return row["status"] if row else None
 
+    def has_active_jobs(self) -> bool:
+        with self._connect() as db:
+            placeholders = ",".join("?" for _ in ACTIVE_STATES)
+            row = db.execute(
+                f"SELECT 1 FROM jobs WHERE status IN ({placeholders}) LIMIT 1",
+                tuple(ACTIVE_STATES),
+            ).fetchone()
+            return row is not None
+
     def run_test_image(self, job_id: str, image_id: int) -> None:
         started = _now()
         with self._lock, self._connect() as db:

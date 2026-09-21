@@ -31,6 +31,11 @@ export function App() {
   useEffect(() => { fetchMosaicSettings().then((value) => { setMosaicStrength(value.value); setMosaicMinimum(value.minimum); }).catch(() => undefined); }, []);
 
   useEffect(() => {
+    const lifecycle = new EventSource("/api/lifecycle/events");
+    return () => lifecycle.close();
+  }, []);
+
+  useEffect(() => {
     const active = jobs.filter((job) => job.status === "queued" || job.status === "running" || job.status === "cancel_requested");
     const streams = active.map((job) => {
       const stream = new EventSource(`/api/jobs/${job.id}/events`);

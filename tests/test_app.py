@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from backend.app.api.lifecycle import router as lifecycle_router
 from backend.app.main import create_app
 
 
@@ -30,3 +31,12 @@ def test_built_frontend_is_served(tmp_path: Path) -> None:
         response = client.get("/some/client/route")
     assert response.status_code == 200
     assert "Image Finisher" in response.text
+
+
+def test_lifecycle_stream_route_is_registered(tmp_path: Path) -> None:
+    app = create_app(frontend_dist=Path("missing"), data_dir=tmp_path)
+    assert any(
+        getattr(route, "original_router", None) is lifecycle_router
+        and route.include_context.prefix == "/api"
+        for route in app.routes
+    )
